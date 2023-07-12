@@ -52,7 +52,7 @@ def check_options():
                     option_name = option["tenancyOption"][0]["name"]
                     option_count += 1
 
-                    if from_year == int(2023) and to_year == int(2024) and option_name and option_name not in ["Semester 2", "Semester 3"]:
+                    if from_year == int(2023) and to_year == int(2024) and option_name and option_name not in ["Semester 2", "Semester 3", "51 Weeks"]:
                         message = f"Residence: {residence['name']}, Room: {room['name']}, Option: {option_name}"
                         messages += message + "\n"
                         
