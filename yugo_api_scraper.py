@@ -59,13 +59,16 @@ def get_data(resource_name, resource_api):
     print(f"\n{item_chosen['name']} is chosen!")
     return item_chosen
 
-def set_options():
+def ask_yes_no_question(question):
     while True:
-        filter_by_date = input("Do you want to filter by date? (Y/N): ").strip().upper()
-        if filter_by_date in ['Y', 'N']:
-            break  # Exit the loop if the response is valid
+        response = input(question + " (Y/N): ").strip().upper()
+        if response in ['Y', 'N']:
+            return response == 'Y'  # Returns True for 'Y', False for 'N'
         else:
             print("Invalid response. Please enter 'Y' for Yes or 'N' for No.")
+
+def set_options():
+    filter_by_date = ask_yes_no_question("Do you want to filter by date?")
     
     options = {}
 
@@ -86,7 +89,17 @@ def set_options():
         options['from_year'] = from_year
         options['to_year'] = to_year
 
+    options['private_bathroom'] = ask_yes_no_question("Do you want a private bathroom?")
+    options['private_kitchen'] = ask_yes_no_question("Do you want a private kitchen?")
+
     return options
+
+def check_arrangement(room_data, room_name):
+    arrengement = room_data.get(room_name, None)
+    private = None
+    if arrengement:
+        private = 'private' in arrengement.lower()
+    return private
 
 def check_options(city_id, my_options):
     try:
@@ -104,7 +117,7 @@ def check_options(city_id, my_options):
             residence_content_id = residence["contentId"]
             
             # Make the GET request to retrieve room data
-            rooms_url = API_PREFIX + API_CALLS["rooms"]["api"].format(residence_id)
+            rooms_url = API_PREFIX + API_CALLS['rooms']['api'].format(residence_id)
             rooms_response = requests.get(rooms_url)
             rooms_data = rooms_response.json()
 
@@ -112,8 +125,15 @@ def check_options(city_id, my_options):
                 continue
             
             # Iterate over the rooms
-            for room in rooms_data["rooms"]:
-                room_id = room["id"]
+            for room in rooms_data[API_CALLS['rooms']['name']]:
+                room_id = room['id']
+
+                private_bathroom = check_arrangement(room, 'bathroomArrangement')
+                private_kitchen = check_arrangement(room, 'kitchenArrangement')
+                private_bathroom_option = my_options.get('private_bathroom', None)
+                private_kitchen_option = my_options.get('private_kitchen', None)
+                if private_bathroom_option and private_bathroom_option != private_bathroom or private_kitchen_option and private_kitchen_option != private_kitchen:
+                    continue
                 
                 # Make the GET request to retrieve tenancy options
                 tenancy_options_url = API_PREFIX + API_CALLS['options']['api'].format(residence_id,residence_content_id,room_id)
