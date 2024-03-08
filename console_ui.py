@@ -5,7 +5,8 @@ from tqdm import tqdm
 class ConsoleUI:
     @staticmethod
     def print_header(title):
-        print(Fore.GREEN + f"\n** {title.upper()} **\n" + Style.RESET_ALL)
+        border = "*" * (len(title) + 6)
+        print(Fore.GREEN + f"\n{border}\n** {title.upper()} **\n{border}" + Style.RESET_ALL)
 
     @staticmethod
     def print_item(index, name):
@@ -18,8 +19,6 @@ class ConsoleUI:
     @staticmethod
     def show_loading_message(message):
         print(Fore.BLUE + message + Style.RESET_ALL)
-        for _ in tqdm(range(100), ncols=75):
-            time.sleep(0.01)  # simulate some loading time
 
     @staticmethod
     def show_error_message(message):
@@ -45,3 +44,7 @@ class ConsoleUI:
                     print(Fore.RED + "Please enter a positive number." + Style.RESET_ALL)
             except ValueError:
                 print(Fore.RED + "Invalid input. Please enter a valid number." + Style.RESET_ALL)
+    
+    @staticmethod
+    def say_goodbye():
+        print(Fore.LIGHTBLUE_EX + "\nThank you for using our application. Goodbye!\n" + Style.RESET_ALL)
