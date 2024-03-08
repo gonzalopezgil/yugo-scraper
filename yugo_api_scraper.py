@@ -101,6 +101,16 @@ def check_arrangement(room_data, room_name):
         private = 'private' in arrengement.lower()
     return private
 
+def filter_room(room, my_options):
+    private_bathroom = check_arrangement(room, 'bathroomArrangement')
+    private_kitchen = check_arrangement(room, 'kitchenArrangement')
+    private_bathroom_option = my_options.get('private_bathroom', None)
+    private_kitchen_option = my_options.get('private_kitchen', None)
+
+    # Return False to exclude room if it doesn't match user's choice
+    return not ((private_bathroom_option and private_bathroom_option != private_bathroom) or
+                (private_kitchen_option and private_kitchen_option != private_kitchen))
+
 def check_options(city_id, my_options):
     try:
         # Make the initial GET request to retrieve room data
@@ -128,11 +138,7 @@ def check_options(city_id, my_options):
             for room in rooms_data[API_CALLS['rooms']['name']]:
                 room_id = room['id']
 
-                private_bathroom = check_arrangement(room, 'bathroomArrangement')
-                private_kitchen = check_arrangement(room, 'kitchenArrangement')
-                private_bathroom_option = my_options.get('private_bathroom', None)
-                private_kitchen_option = my_options.get('private_kitchen', None)
-                if private_bathroom_option and private_bathroom_option != private_bathroom or private_kitchen_option and private_kitchen_option != private_kitchen:
+                if not filter_room(room, my_options):
                     continue
                 
                 # Make the GET request to retrieve tenancy options
