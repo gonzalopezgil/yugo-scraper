@@ -3,6 +3,7 @@ import schedule
 import time
 import logging
 import os
+from console_ui import ConsoleUI
 
 # Set up Pushover credentials
 api_token = os.environ.get('API_TOKEN')
@@ -44,54 +45,37 @@ def check_item(data):
         assert n_item >= 0
         return data[n_item]
     except:
-        print("Please, introduce a valid number!")
+        ConsoleUI.show_error_message('Please, introduce a valid number!')
         return check_item(data)
 
 def get_data(resource_name, resource_api):
     url = API_PREFIX + resource_api
     response = requests.get(url)
     data = response.json()
-    print(f"\n** {resource_name.upper()} **\n")
+    ConsoleUI.print_header(resource_name)
     for i, item in enumerate(data[resource_name], start=1):
-        print(f"{i}. {item['name']}")
+        ConsoleUI.print_item(i, item['name'])
     item_chosen = check_item(data[resource_name])
-    print(f"\n{item_chosen['name']} is chosen!")
+    ConsoleUI.print_confirmation(item_chosen)
     return item_chosen
-
-def ask_yes_no_question(question):
-    while True:
-        response = input(question + " (Y/N): ").strip().upper()
-        if response in ['Y', 'N']:
-            return response == 'Y'  # Returns True for 'Y', False for 'N'
-        else:
-            print("Invalid response. Please enter 'Y' for Yes or 'N' for No.")
-
-def get_numeric_input(prompt):
-    while True:
-        try:
-            n = float(input(prompt))
-            assert(n > 0)
-            return n
-        except (ValueError, AssertionError):
-            print("Invalid input. Please enter a valid number.")
 
 def set_options():
     options = {}
 
     # Filter by room arrangements.
-    options['private_bathroom'] = ask_yes_no_question("Do you want a private bathroom?")
-    options['private_kitchen'] = ask_yes_no_question("Do you want a private kitchen?")
+    options['private_bathroom'] = ConsoleUI.ask_yes_no_question("Do you want a private bathroom?")
+    options['private_kitchen'] = ConsoleUI.ask_yes_no_question("Do you want a private kitchen?")
 
     # Filter by price.
-    filter_by_price = ask_yes_no_question("Do you want to filter by price?")
+    filter_by_price = ConsoleUI.ask_yes_no_question("Do you want to filter by price?")
     if filter_by_price:
-        options['max_price'] = get_numeric_input("Maximum price per month: ")
+        options['max_price'] = ConsoleUI.get_numeric_input("Maximum price per month: ")
 
     # Filter by date.
-    filter_by_date = ask_yes_no_question("Do you want to filter by date?")
+    filter_by_date = ConsoleUI.ask_yes_no_question("Do you want to filter by date?")
     if filter_by_date:
-        options['from_year'] = get_numeric_input("From year: ")
-        options['to_year'] = get_numeric_input("To year: ")
+        options['from_year'] = ConsoleUI.get_numeric_input("From year: ")
+        options['to_year'] = ConsoleUI.get_numeric_input("To year: ")
 
     return options
 
@@ -161,6 +145,8 @@ def filter_room(room, my_options):
 
 def check_options(city_id, my_options):
     try:
+        ConsoleUI.show_loading_message('Getting data')
+
         # Make the initial GET request to retrieve room data
         residences_url = API_PREFIX + API_CALLS["residences"]["api"].format(city_id)
         residences_response = requests.get(residences_url)
@@ -219,6 +205,7 @@ def check_options(city_id, my_options):
                         
         if messages != "":
             # Send Pushover notification
+            print(f'\n{messages}')
             send_notification(messages)
         else:
             logger.info(f"Scraped {option_count} options. No available rooms found")
@@ -265,22 +252,25 @@ def set_up_logging():
 
 def main():
     set_up_logging()
+    
+    try:
+        country = get_data(API_CALLS['countries']['name'], API_CALLS['countries']['api'])
+        city = get_data(API_CALLS['cities']['name'], API_CALLS['cities']['api'].format(country[API_CALLS['cities']['param']]))
+        options = set_options()
 
-    country = get_data(API_CALLS['countries']['name'], API_CALLS['countries']['api'])
-    city = get_data(API_CALLS['cities']['name'], API_CALLS['cities']['api'].format(country[API_CALLS['cities']['param']]))
-    options = set_options()
+        # Execute check_options immediately
+        check_options(city[API_CALLS['residences']['param']], options)
 
-    # Execute check_options immediately
-    check_options(city[API_CALLS['residences']['param']], options)
+        # Schedule the job to run every minute
+        schedule.every(1).minutes.do(lambda: check_options(city[API_CALLS['residences']['param']], options))
+        logger.info("Job scheduled")
 
-    # Schedule the job to run every minute
-    schedule.every(1).minutes.do(lambda: check_options(city[API_CALLS['residences']['param']], options))
-    logger.info("Job scheduled")
-
-    # Keep the script running
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+        # Keep the script running
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+    except Exception as e:
+        ConsoleUI.show_error_message(str(e))
 
 if __name__ == "__main__":
     main()
