@@ -3,7 +3,6 @@ import schedule
 import time
 import logging
 import os
-from datetime import datetime
 
 # Set up Pushover credentials
 api_token = os.environ.get('API_TOKEN')
@@ -67,30 +66,32 @@ def ask_yes_no_question(question):
         else:
             print("Invalid response. Please enter 'Y' for Yes or 'N' for No.")
 
+def get_numeric_input(prompt):
+    while True:
+        try:
+            n = int(input(prompt))
+            assert(n > 0)
+            return n
+        except (ValueError, AssertionError):
+            print("Invalid input. Please enter a valid number.")
+
 def set_options():
-    filter_by_date = ask_yes_no_question("Do you want to filter by date?")
-    
     options = {}
 
-    if filter_by_date == 'Y':
-        def get_year(prompt):
-            limit_year = datetime.now().year + 10
-            while True:
-                try:
-                    year = int(input(prompt))
-                    if year > 0 and year < limit_year:
-                        return year
-                    else:
-                        print(f"Please enter a valid year between 1 and {limit_year}.")
-                except ValueError:
-                    print("Invalid input. Please enter a valid year.")
-        from_year = get_year("From year: ")
-        to_year = get_year("To year: ")
-        options['from_year'] = from_year
-        options['to_year'] = to_year
-
+    # Filter by room arrangements.
     options['private_bathroom'] = ask_yes_no_question("Do you want a private bathroom?")
     options['private_kitchen'] = ask_yes_no_question("Do you want a private kitchen?")
+
+    # Filter by price.
+    filter_by_price = ask_yes_no_question("Do you want to filter by price?")
+    if filter_by_price:
+        options['max_price'] = get_numeric_input("Maximum price per month: ")
+
+    # Filter by date.
+    filter_by_date = ask_yes_no_question("Do you want to filter by date?")
+    if filter_by_date:
+        options['from_year'] = get_numeric_input("From year: ")
+        options['to_year'] = get_numeric_input("To year: ")
 
     return options
 
@@ -101,15 +102,44 @@ def check_arrangement(room_data, room_name):
         private = 'private' in arrengement.lower()
     return private
 
-def filter_room(room, my_options):
-    private_bathroom = check_arrangement(room, 'bathroomArrangement')
-    private_kitchen = check_arrangement(room, 'kitchenArrangement')
-    private_bathroom_option = my_options.get('private_bathroom', None)
-    private_kitchen_option = my_options.get('private_kitchen', None)
+def get_monthly_price(price_per_night):
+    return price_per_night * 7 * 4.33 # Assume that a month has an average of 4.33 weeks.
 
+def filter_room(room, my_options):
     # Return False to exclude room if it doesn't match user's choice
-    return not ((private_bathroom_option and private_bathroom_option != private_bathroom) or
-                (private_kitchen_option and private_kitchen_option != private_kitchen))
+    
+    # Exclude sold out rooms
+    sold_out = room.get('soldOut', None)
+    if sold_out != False:
+        return False
+    
+    # Exclude rooms that don't match the user's room arrangement preferences.
+    private_bathroom_option = my_options.get('private_bathroom', None)
+    if private_bathroom_option:
+        private_bathroom = check_arrangement(room, 'bathroomArrangement')
+        if (not private_bathroom) or (private_bathroom_option != private_bathroom):
+            return False
+    
+    private_kitchen_option = my_options.get('private_kitchen', None)
+    if private_kitchen_option:
+        private_kitchen = check_arrangement(room, 'kitchenArrangement')
+        if (not private_kitchen) or (private_kitchen_option != private_kitchen):
+            return False
+    
+    # Exclude rooms that don't match the user's price preferences.
+    max_price_option = my_options.get('max_price', None)
+    if max_price_option:
+        max_price_option = float(max_price_option)
+        price_per_night = room.get('minPricePerNight', None)
+        if price_per_night:
+            price_per_night = float(price_per_night)
+            price_per_month = get_monthly_price(price_per_night)
+            if price_per_month > max_price_option:
+                return False
+        else: # Exclude if the user is filtering and the price isn't fixed
+            return False
+        
+    return True
 
 def check_options(city_id, my_options):
     try:
