@@ -69,7 +69,7 @@ def ask_yes_no_question(question):
 def get_numeric_input(prompt):
     while True:
         try:
-            n = int(input(prompt))
+            n = float(input(prompt))
             assert(n > 0)
             return n
         except (ValueError, AssertionError):
@@ -102,8 +102,32 @@ def check_arrangement(room_data, room_name):
         private = 'private' in arrengement.lower()
     return private
 
-def get_monthly_price(price_per_night):
-    return price_per_night * 7 * 4.33 # Assume that a month has an average of 4.33 weeks.
+def get_monthly_price(room):
+    price_label = room.get('priceLabel', None)
+    if price_label:
+        # If the monthly price is present, return it to be more precise.
+        if 'month' in price_label.lower():
+            price_billing_cycle = room.get('minPriceForBillingCycle', None)
+            if price_billing_cycle:
+                try:
+                    return float(price_billing_cycle)
+                except ValueError:
+                    pass
+        elif 'week' in price_label.lower():
+            price_billing_cycle = room.get('minPriceForBillingCycle', None)
+            if price_billing_cycle:
+                try:
+                    return float(price_billing_cycle) * 4.33
+                except ValueError:
+                    pass
+    
+    price_per_night = room.get('minPricePerNight', None)
+    if price_per_night:
+        try:
+            return float(price_per_night) * 7 * 4.33 # Assume that a month has an average of 4.33 weeks.
+        except ValueError:
+            return None
+    return None
 
 def filter_room(room, my_options):
     # Return False to exclude room if it doesn't match user's choice
@@ -129,14 +153,8 @@ def filter_room(room, my_options):
     # Exclude rooms that don't match the user's price preferences.
     max_price_option = my_options.get('max_price', None)
     if max_price_option:
-        max_price_option = float(max_price_option)
-        price_per_night = room.get('minPricePerNight', None)
-        if price_per_night:
-            price_per_night = float(price_per_night)
-            price_per_month = get_monthly_price(price_per_night)
-            if price_per_month > max_price_option:
-                return False
-        else: # Exclude if the user is filtering and the price isn't fixed
+        price_per_month = get_monthly_price(room)
+        if not price_per_month or price_per_month > max_price_option:
             return False
         
     return True
