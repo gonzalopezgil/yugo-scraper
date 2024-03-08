@@ -3,6 +3,7 @@ import schedule
 import time
 import logging
 import os
+from datetime import datetime
 
 # Set up Pushover credentials
 api_token = os.environ.get('API_TOKEN')
@@ -10,10 +11,87 @@ user_key = os.environ.get('USER_KEY')
 
 logger = logging.getLogger(__name__)
 
-def check_options():
+API_PUSHOVER = "https://api.pushover.net/1/messages.json"
+API_PREFIX = "https://yugo.com/en-gb/"
+API_CALLS = {
+    "countries": {
+        "name": "countries",
+        "api": "countries"
+    },
+    "cities": {
+        "name": "cities",
+        "api": "cities?countryId={}",
+        "param": "countryId"
+    },
+    "residences": {
+        "name": "residences",
+        "api": "residences?cityId={}",
+        "param": "contentId"
+    },
+    "rooms": {
+        "name": "rooms",
+        "api": "rooms?residenceId={}",
+        "param": "residenceId"
+    },
+    "options": {
+        "name": "tenancyOptions",
+        "api": "tenancyOptionsBySSId?residenceId={}&residenceContentId={}&roomId={}",
+    }
+}
+
+def check_item(data):
+    try:
+        n_item = int(input("Choose: ")) - 1
+        assert n_item >= 0
+        return data[n_item]
+    except:
+        print("Please, introduce a valid number!")
+        return check_item(data)
+
+def get_data(resource_name, resource_api):
+    url = API_PREFIX + resource_api
+    response = requests.get(url)
+    data = response.json()
+    print(f"\n** {resource_name.upper()} **\n")
+    for i, item in enumerate(data[resource_name], start=1):
+        print(f"{i}. {item['name']}")
+    item_chosen = check_item(data[resource_name])
+    print(f"\n{item_chosen['name']} is chosen!")
+    return item_chosen
+
+def set_options():
+    while True:
+        filter_by_date = input("Do you want to filter by date? (Y/N): ").strip().upper()
+        if filter_by_date in ['Y', 'N']:
+            break  # Exit the loop if the response is valid
+        else:
+            print("Invalid response. Please enter 'Y' for Yes or 'N' for No.")
+    
+    options = {}
+
+    if filter_by_date == 'Y':
+        def get_year(prompt):
+            limit_year = datetime.now().year + 10
+            while True:
+                try:
+                    year = int(input(prompt))
+                    if year > 0 and year < limit_year:
+                        return year
+                    else:
+                        print(f"Please enter a valid year between 1 and {limit_year}.")
+                except ValueError:
+                    print("Invalid input. Please enter a valid year.")
+        from_year = get_year("From year: ")
+        to_year = get_year("To year: ")
+        options['from_year'] = from_year
+        options['to_year'] = to_year
+
+    return options
+
+def check_options(city_id, my_options):
     try:
         # Make the initial GET request to retrieve room data
-        residences_url = "https://yugo.com/es-es/residences?cityId=217156"
+        residences_url = API_PREFIX + API_CALLS["residences"]["api"].format(city_id)
         residences_response = requests.get(residences_url)
         residences_data = residences_response.json()
 
@@ -26,7 +104,7 @@ def check_options():
             residence_content_id = residence["contentId"]
             
             # Make the GET request to retrieve room data
-            rooms_url = f"https://yugo.com/es-es/rooms?residenceId={residence_id}"
+            rooms_url = API_PREFIX + API_CALLS["rooms"]["api"].format(residence_id)
             rooms_response = requests.get(rooms_url)
             rooms_data = rooms_response.json()
 
@@ -38,7 +116,7 @@ def check_options():
                 room_id = room["id"]
                 
                 # Make the GET request to retrieve tenancy options
-                tenancy_options_url = f"https://yugo.com/es-es/tenancyOptionsBySSId?residenceId={residence_id}&residenceContentId={residence_content_id}&roomId={room_id}"
+                tenancy_options_url = API_PREFIX + API_CALLS['options']['api'].format(residence_id,residence_content_id,room_id)
                 tenancy_options_response = requests.get(tenancy_options_url)
                 tenancy_options_data = tenancy_options_response.json()
 
@@ -52,7 +130,16 @@ def check_options():
                     option_name = option["tenancyOption"][0]["name"]
                     option_count += 1
 
-                    if from_year == int(2023) and to_year == int(2024) and option_name and option_name not in ["Semester 2", "Semester 3", "51 Weeks"]:
+                    add_message = False
+                    from_year_option = my_options.get('from_year', None)
+                    to_year_option = my_options.get('to_year', None)
+                    if from_year_option and to_year_option:
+                        if from_year == from_year_option and to_year == to_year_option:
+                            add_message = True
+                    else:
+                        add_message = True
+
+                    if add_message:
                         message = f"Residence: {residence['name']}, Room: {room['name']}, Option: {option_name}"
                         messages += message + "\n"
                         
@@ -64,14 +151,14 @@ def check_options():
         
     except Exception as e:
         logger.error(f"Error: {e}")
-        send_notification(str(e))   
+        send_notification(str(e))
 
 def send_notification(message):
     if message == None or message == "":
         return
     
     # Send Pushover notification
-    r = requests.post("https://api.pushover.net/1/messages.json", data = {
+    r = requests.post(API_PUSHOVER, data = {
         "token": api_token,
         "user": user_key,
         "message": message,
@@ -105,8 +192,15 @@ def set_up_logging():
 def main():
     set_up_logging()
 
+    country = get_data(API_CALLS['countries']['name'], API_CALLS['countries']['api'])
+    city = get_data(API_CALLS['cities']['name'], API_CALLS['cities']['api'].format(country[API_CALLS['cities']['param']]))
+    options = set_options()
+
+    # Execute check_options immediately
+    check_options(city[API_CALLS['residences']['param']], options)
+
     # Schedule the job to run every minute
-    schedule.every(1).minutes.do(check_options)
+    schedule.every(1).minutes.do(lambda: check_options(city[API_CALLS['residences']['param']], options))
     logger.info("Job scheduled")
 
     # Keep the script running
