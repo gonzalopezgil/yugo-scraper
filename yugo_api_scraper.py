@@ -201,7 +201,7 @@ def check_options(city_id, my_options):
                 for option in tenancy_options_data["tenancy-options"]:
                     from_year = option["fromYear"]
                     to_year = option["toYear"]
-                    option_name = option["tenancyOption"][0]["name"]
+                    option_data = option["tenancyOption"][0]
                     option_count += 1
 
                     add_message = False
@@ -214,7 +214,7 @@ def check_options(city_id, my_options):
                         add_message = True
 
                     if add_message:
-                        message = f"Residence: {residence['name']}, Room: {room['name']}, Option: {option_name}"
+                        message = f"Space: {residence['name']}\nRoom type: {room['name']} - {room['priceLabel']}, {room['roomArrangemets']}\nLength of stay: {option_data['name']}, {option_data['formattedLabel']}"
                         messages += message + "\n"
                         
         if messages != "":
