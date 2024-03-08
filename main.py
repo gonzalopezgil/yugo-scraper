@@ -3,6 +3,7 @@ import schedule
 import time
 import logging
 import os
+import sys
 from console_ui import ConsoleUI
 
 # Set up Pushover credentials
@@ -143,9 +144,9 @@ def filter_room(room, my_options):
         
     return True
 
-def check_options(city_id, my_options):
+def check_options(city_id, my_options, notifications=False):
     try:
-        ConsoleUI.show_loading_message('Getting data')
+        ConsoleUI.show_loading_message('\nGetting data...')
 
         # Make the initial GET request to retrieve room data
         residences_url = API_PREFIX + API_CALLS["residences"]["api"].format(city_id)
@@ -202,17 +203,20 @@ def check_options(city_id, my_options):
                     if add_message:
                         message = f"Space: {residence['name']}\nRoom type: {room['name']} - {room['priceLabel']}, {room['roomArrangemets']}\nLength of stay: {option_data['name']}, {option_data['formattedLabel']}"
                         messages += message + "\n"
+                        logger.info(message)
                         
         if messages != "":
+            logger.info(f"Scraped {option_count} options.")
             # Send Pushover notification
-            print(f'\n{messages}')
-            send_notification(messages)
+            if notifications:
+                send_notification(messages)
         else:
             logger.info(f"Scraped {option_count} options. No available rooms found")
         
     except Exception as e:
         logger.error(f"Error: {e}")
-        send_notification(str(e))
+        if notifications:
+            send_notification(str(e))
 
 def send_notification(message):
     if message == None or message == "":
@@ -261,14 +265,22 @@ def main():
         # Execute check_options immediately
         check_options(city[API_CALLS['residences']['param']], options)
 
-        # Schedule the job to run every minute
-        schedule.every(1).minutes.do(lambda: check_options(city[API_CALLS['residences']['param']], options))
-        logger.info("Job scheduled")
+        receive_notifications = ConsoleUI.ask_yes_no_question('Would you like to receive notifications on your phone when new rooms that match your preferences are found?')
+        if receive_notifications:
+            if not api_token or not user_key:
+                ConsoleUI.show_error_message('API token or user key is not defined. Please set up your Pushover credentials to receive notifications.')
+                sys.exit()
 
-        # Keep the script running
-        while True:
-            schedule.run_pending()
-            time.sleep(1)
+            # Schedule the job to run every minute
+            schedule.every(1).minutes.do(lambda: check_options(city[API_CALLS['residences']['param']], options, notifications=True))
+            logger.info("Job scheduled")
+
+            # Keep the script running
+            while True:
+                schedule.run_pending()
+                time.sleep(1)
+        else:
+            ConsoleUI.say_goodbye()
     except Exception as e:
         ConsoleUI.show_error_message(str(e))
 
