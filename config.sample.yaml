@@ -6,6 +6,8 @@ providers:
     enabled: true
   aparto:
     enabled: true
+    term_id_start: 1200
+    term_id_end: 1600
 
 target:
   country: "Ireland"

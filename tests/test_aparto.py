@@ -7,6 +7,8 @@ term matching, and the provider interface across multiple cities.
 import unittest
 from unittest.mock import MagicMock, patch
 
+from student_rooms.matching import match_semester1
+from student_rooms.models.config import AcademicYearConfig, Semester1Rules
 from student_rooms.providers.aparto import (
     ApartoProvider,
     CITY_COUNTRY_MAP,
@@ -18,7 +20,6 @@ from student_rooms.providers.aparto import (
     _extract_prices_from_html,
     _extract_property_name,
     _extract_rsc_json_chunks,
-    _is_semester1_term,
     _is_target_city_term,
     _normalise_name,
     _parse_months_from_name,
@@ -499,9 +500,9 @@ class TestApartoScanMocked(unittest.TestCase):
             term_id=9999,
             term_name="Binary Hub - 26/27 - Semester 1",
             property_name="Binary Hub",
-            start_date="29/08/2026",
+            start_date="01/09/2026",
             end_date="31/01/2027",
-            start_iso="2026-08-29",
+            start_iso="2026-09-01",
             end_iso="2027-01-31",
             weeks=22,
             is_target_city=True,
@@ -571,18 +572,57 @@ class TestApartoScanMocked(unittest.TestCase):
 class TestStarRezTermAnalysis(unittest.TestCase):
     """Test StarRez term detection and analysis."""
 
-    def test_is_semester1_by_keyword(self):
-        self.assertTrue(_is_semester1_term("Semester 1 26/27", "29/08/2026", "31/01/2027", 22))
-        self.assertTrue(_is_semester1_term("Sem 1", None, None, None))
-        self.assertFalse(_is_semester1_term("Full Year 41 Weeks", "29/08/2026", "12/06/2027", 41))
+    def test_match_semester1_requires_keyword(self):
+        config = AcademicYearConfig(
+            start_year=2026,
+            end_year=2027,
+            semester1=Semester1Rules(
+                name_keywords=["semester 1", "sem 1"],
+                require_keyword=True,
+                start_months=[8, 9, 10],
+                end_months=[12, 1, 2],
+                enforce_month_window=True,
+            ),
+        )
+        option = {
+            "fromYear": 2026,
+            "toYear": 2027,
+            "tenancyOption": [{
+                "name": "Semester 1 26/27",
+                "formattedLabel": "Semester 1",
+                "startDate": "2026-09-01",
+                "endDate": "2027-01-31",
+            }],
+        }
+        self.assertTrue(match_semester1(option, config))
 
-    def test_is_semester1_by_duration(self):
-        self.assertTrue(_is_semester1_term("Special 22 Weeks", "29/08/2026", "31/01/2027", 22))
-        self.assertFalse(_is_semester1_term("Special 22 Weeks", "01/02/2027", "30/06/2027", 22))
+        option["tenancyOption"][0]["name"] = "Full Year 41 Weeks"
+        option["tenancyOption"][0]["formattedLabel"] = "Full Year 41 Weeks"
+        self.assertFalse(match_semester1(option, config))
 
-    def test_is_semester1_by_iso_dates(self):
-        self.assertTrue(_is_semester1_term("Short Stay", "2026-09-01", "2027-01-31", None))
-        self.assertFalse(_is_semester1_term("Full Year", "2026-08-29", "2027-06-12", None))
+    def test_match_semester1_without_keyword(self):
+        config = AcademicYearConfig(
+            start_year=2026,
+            end_year=2027,
+            semester1=Semester1Rules(
+                name_keywords=["semester 1"],
+                require_keyword=False,
+                start_months=[8, 9, 10],
+                end_months=[12, 1, 2],
+                enforce_month_window=True,
+            ),
+        )
+        option = {
+            "fromYear": 2026,
+            "toYear": 2027,
+            "tenancyOption": [{
+                "name": "Short Stay",
+                "formattedLabel": "Short Stay",
+                "startDate": "2026-09-01",
+                "endDate": "2027-01-31",
+            }],
+        }
+        self.assertTrue(match_semester1(option, config))
 
     def test_extract_property_name(self):
         self.assertEqual(_extract_property_name("Binary Hub - 26/27 - 41 Weeks"), "Binary Hub")

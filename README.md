@@ -111,7 +111,7 @@ student-rooms scan --provider all
 | Command | Description |
 |---------|-------------|
 | `discover` | List all properties available from providers in your target city |
-| `scan` | One-shot scan for rooms matching your semester/price criteria |
+| `scan` | One-shot scan for rooms matching your semester/price/privacy criteria |
 | `watch` | Continuous monitoring loop — alerts on new availability |
 | `probe-booking` | Deep-probe the booking flow for a matched option (generates direct booking links) |
 | `notify` | Send a test notification to verify your notification setup |
@@ -127,6 +127,12 @@ target:
   country: "Ireland"
   city: "Dublin"
 
+# Provider settings
+providers:
+  aparto:
+    term_id_start: 1200
+    term_id_end: 1600
+
 # Academic year & semester detection
 academic_year:
   start_year: 2026
@@ -137,9 +143,12 @@ academic_year:
     start_months: [8, 9, 10]
     end_months: [12, 1, 2]
 
-# Price filters
+# Filters
 filters:
+  private_bathroom: null   # true | false | null (any)
+  private_kitchen: null    # true | false | null (any)
   max_weekly_price: 350.0
+  max_monthly_price: null
 
 # Monitoring interval
 polling:
@@ -150,6 +159,8 @@ polling:
 notifications:
   type: "stdout"
 ```
+
+Filters apply to both `scan` and `watch`. If a room lacks the required metadata (e.g. private bathroom/kitchen), it will be excluded when that filter is set.
 
 ### Notification Backends
 
@@ -201,7 +212,7 @@ notifications:
 ### Yugo Provider
 1. Resolves country → city → residences via Yugo's JSON API
 2. For each residence, fetches room types and tenancy options
-3. Filters by academic year and semester using name keywords + date analysis
+3. Filters by academic year and semester using config-driven name keywords + date rules
 4. Supports full booking-flow probing (available beds, flat selection, portal redirect)
 
 ### Aparto Provider (StarRez)
@@ -209,7 +220,7 @@ notifications:
 2. Establishes session via the EU StarRez portal (auto-selects the correct country)
 3. Probes a range of **termIDs** via direct room search URLs on the appropriate regional portal
 4. Filters terms by matching property names against the target city's properties (supports abbreviations like PA→Pallars, CdM→Cristobal de Moura)
-5. Detects Semester 1 by keyword matching + duration/date analysis
+5. Detects Semester 1 using the same config-driven name keywords + date rules as Yugo
 6. Enriches results with pricing data scraped from property pages
 
 **Portal topology:**
@@ -220,7 +231,7 @@ notifications:
 ### Watch Mode
 - Scans all enabled providers at configurable intervals
 - Deduplicates: only alerts on **new** options not previously seen
-- Persists seen options in `reports/seen_options.json`
+- Persists seen options in `~/.local/share/student-rooms-cli/seen_options.json` (or `$XDG_DATA_HOME`)
 - Adds random jitter to avoid request patterns
 
 ## Agent Integration

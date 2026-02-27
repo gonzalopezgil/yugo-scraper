@@ -15,6 +15,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from student_rooms.matching import apply_filters
 from student_rooms.models.config import Config, load_config
 from student_rooms.notifiers.base import create_notifier
 from student_rooms.providers.base import RoomOption
@@ -25,12 +26,18 @@ logger = logging.getLogger(__name__)
 # Dedup persistence
 # ---------------------------------------------------------------------------
 
-SEEN_FILE = os.path.join(os.path.dirname(__file__), "..", "reports", "seen_options.json")
+LEGACY_SEEN_FILE = os.path.join(os.path.dirname(__file__), "..", "reports", "seen_options.json")
 
 
 def _default_seen_path() -> str:
-    """Return path for seen_options.json, preferring a 'reports' dir next to config."""
-    return os.path.abspath(SEEN_FILE)
+    """Return path for seen_options.json, preferring user data dir with legacy fallback."""
+    legacy_path = os.path.abspath(LEGACY_SEEN_FILE)
+    if os.path.exists(legacy_path):
+        return legacy_path
+
+    data_home = os.environ.get("XDG_DATA_HOME") or os.path.join("~", ".local", "share")
+    data_dir = os.path.expanduser(os.path.join(data_home, "student-rooms-cli"))
+    return os.path.join(data_dir, "seen_options.json")
 
 
 def load_seen_keys(path: Optional[str] = None) -> Set[str]:
@@ -88,9 +95,13 @@ def make_providers(
 
     if want_aparto and aparto_enabled:
         from student_rooms.providers.aparto import ApartoProvider
+        aparto_start = getattr(providers_cfg, "aparto_term_id_start", None) if providers_cfg else None
+        aparto_end = getattr(providers_cfg, "aparto_term_id_end", None) if providers_cfg else None
         instances.append(ApartoProvider(
             city=city or config.target.city or "Dublin",
             country=country or config.target.country,
+            term_id_start=aparto_start or 1200,
+            term_id_end=aparto_end or 1600,
         ))
 
     return instances
@@ -103,10 +114,13 @@ def make_providers(
 def configure_logging() -> None:
     root = logging.getLogger()
     root.setLevel(logging.INFO)
+    if any(getattr(h, "_student_rooms_handler", False) for h in root.handlers):
+        return
     fmt = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     handler = logging.StreamHandler()
     handler.setLevel(logging.INFO)
     handler.setFormatter(fmt)
+    handler._student_rooms_handler = True  # type: ignore[attr-defined]
     root.addHandler(handler)
 
 
@@ -118,6 +132,7 @@ def build_alert_message(
     matches: List[RoomOption],
     provider_probe: Optional[Dict[str, Any]] = None,
     is_new: bool = True,
+    all_options: bool = False,
 ) -> str:
     """Build alert message for matched room options (multi-provider)."""
     if not matches:
@@ -125,9 +140,10 @@ def build_alert_message(
 
     top = matches[0]
     flag = "🚨 NEW" if is_new else "🔁 REMINDER"
+    header = "Availability detected" if all_options else "Semester 1 detected"
 
     lines = [
-        f"{flag} · Student Rooms · Semester 1 detected",
+        f"{flag} · Student Rooms · {header}",
         "",
         "⭐ Top match:",
     ]
@@ -174,6 +190,33 @@ def handle_discover(args: argparse.Namespace, config: Config) -> int:
         city_id=getattr(args, "city_id", None),
     )
 
+    if getattr(args, "countries", False) or getattr(args, "cities", False) or getattr(args, "residences", False):
+        yugo_provider = next((p for p in providers if p.name == "yugo"), None)
+        if not yugo_provider:
+            print("Yugo provider not enabled; listing flags are only supported for Yugo.")
+            return 2
+
+        if args.countries:
+            items = yugo_provider.list_countries()
+            label = "countries"
+        elif args.cities:
+            items = yugo_provider.list_cities()
+            label = "cities"
+        else:
+            items = yugo_provider.list_residences()
+            label = "residences"
+
+        if args.json:
+            print(json.dumps(items, ensure_ascii=False, indent=2))
+        else:
+            print(f"Found {len(items)} {label}:")
+            for item in items:
+                name = item.get("name") or item.get("displayName") or item.get("contentId") or item.get("id") or str(item)
+                item_id = item.get("contentId") or item.get("id") or item.get("countryId") or ""
+                suffix = f" ({item_id})" if item_id else ""
+                print(f"- {name}{suffix}")
+        return 0
+
     all_props: List[Dict] = []
     for p in providers:
         props = p.discover_properties()
@@ -214,12 +257,18 @@ def handle_scan(args: argparse.Namespace, config: Config) -> int:
     all_matches: List[RoomOption] = []
     for p in providers:
         try:
-            matches = p.scan(academic_year=academic_year, semester=1, apply_semester_filter=apply_filter)
+            matches = p.scan(
+                academic_year=academic_year,
+                semester=1,
+                apply_semester_filter=apply_filter,
+                academic_config=config.academic_year,
+            )
             all_matches.extend(matches)
-        except Exception as exc:
-            logger.error("Provider %s scan failed: %s", p.name, exc)
+        except Exception:
+            logger.exception("Provider %s scan failed", p.name)
 
-    ranked = prioritize_matches(all_matches)
+    filtered = apply_filters(all_matches, config.filters)
+    ranked = prioritize_matches(filtered)
 
     if args.json:
         print(json.dumps(
@@ -277,7 +326,7 @@ def handle_scan(args: argparse.Namespace, config: Config) -> int:
         except (StopIteration, NotImplementedError, Exception) as exc:
             logger.warning("Booking probe for notify failed: %s", exc)
 
-        message = build_alert_message(ranked, probe, is_new=True)
+        message = build_alert_message(ranked, probe, is_new=True, all_options=not apply_filter)
         notifier.send(message)
 
     return 0
@@ -299,6 +348,10 @@ def handle_watch(args: argparse.Namespace, config: Config) -> int:
     notifier = create_notifier(config.notifications)
 
     seen_keys = load_seen_keys()
+    failure_counts: Dict[str, int] = {p.name: 0 for p in providers}
+    backoff_until: Dict[str, float] = {p.name: 0.0 for p in providers}
+    backoff_base = 30
+    backoff_max = 600
     logger.info(
         "Watch loop started: providers=%s interval=%ds jitter=%ds seen=%d keys",
         [p.name for p in providers],
@@ -315,13 +368,33 @@ def handle_watch(args: argparse.Namespace, config: Config) -> int:
         while True:
             all_matches: List[RoomOption] = []
             for p in providers:
+                now = time.monotonic()
+                if now < backoff_until.get(p.name, 0.0):
+                    logger.info(
+                        "Skipping %s due to backoff (%.0fs remaining)",
+                        p.name,
+                        backoff_until[p.name] - now,
+                    )
+                    continue
                 try:
-                    matches = p.scan(academic_year=academic_year, semester=1, apply_semester_filter=True)
+                    matches = p.scan(
+                        academic_year=academic_year,
+                        semester=1,
+                        apply_semester_filter=True,
+                        academic_config=config.academic_year,
+                    )
                     all_matches.extend(matches)
-                except Exception as exc:
-                    logger.error("Provider %s watch scan failed: %s", p.name, exc)
+                    failure_counts[p.name] = 0
+                    backoff_until[p.name] = 0.0
+                except Exception:
+                    logger.exception("Provider %s watch scan failed", p.name)
+                    failure_counts[p.name] = failure_counts.get(p.name, 0) + 1
+                    backoff = min(backoff_max, backoff_base * (2 ** (failure_counts[p.name] - 1)))
+                    backoff_until[p.name] = time.monotonic() + backoff
+                    logger.warning("Provider %s backoff set to %ds", p.name, backoff)
 
-            ranked = prioritize_matches(all_matches)
+            filtered = apply_filters(all_matches, config.filters)
+            ranked = prioritize_matches(filtered)
             logger.info("Scanned %s options. Total matches: %s", len(all_matches), len(ranked))
 
             # Detect new options not yet seen
@@ -346,7 +419,7 @@ def handle_watch(args: argparse.Namespace, config: Config) -> int:
                     except (StopIteration, NotImplementedError, Exception) as exc:
                         logger.warning("Watch probe failed: %s", exc)
 
-                    message = build_alert_message(new_matches, probe, is_new=True)
+                    message = build_alert_message(new_matches, probe, is_new=True, all_options=False)
                     notifier.send(message)
 
                 # Add new keys to seen set and persist
@@ -381,7 +454,12 @@ def handle_probe_booking(args: argparse.Namespace, config: Config) -> int:
     all_matches: List[RoomOption] = []
     for p in providers:
         try:
-            matches = p.scan(academic_year=academic_year, semester=1, apply_semester_filter=apply_filter)
+            matches = p.scan(
+                academic_year=academic_year,
+                semester=1,
+                apply_semester_filter=apply_filter,
+                academic_config=config.academic_year,
+            )
             all_matches.extend(matches)
         except Exception as exc:
             logger.error("Provider %s probe scan failed: %s", p.name, exc)
@@ -434,7 +512,7 @@ def handle_probe_booking(args: argparse.Namespace, config: Config) -> int:
         if error:
             print(error)
             return 2
-        message = build_alert_message(candidates, probe, is_new=True)
+        message = build_alert_message(candidates, probe, is_new=True, all_options=not apply_filter)
         notifier.send(message)
 
     if args.json:

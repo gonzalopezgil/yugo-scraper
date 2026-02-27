@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from student_rooms.matching import match_semester1
+from student_rooms.models.config import AcademicYearConfig
 from student_rooms.providers.base import BaseProvider, RoomOption
 
 logger = logging.getLogger(__name__)
@@ -57,7 +59,13 @@ class YugoClient:
                 # Server errors (5xx) are transient — retry
                 if response.status_code >= 500:
                     response.raise_for_status()
-                return response.json()
+                try:
+                    return response.json()
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Yugo API returned non-JSON response for {method} {path} "
+                        f"(HTTP {response.status_code})"
+                    ) from exc
             except requests.RequestException as exc:
                 last_error = exc
                 # Don't retry client errors (4xx)
@@ -203,12 +211,9 @@ class YugoProvider(BaseProvider):
         if self._city_id:
             return self._city_id
 
-        countries = self._client.list_countries()
-        country_match = find_by_name(countries, self._country)
-        if not country_match:
-            logger.error("Yugo: country '%s' not found", self._country)
+        cid = self._resolve_country_id()
+        if not cid:
             return None
-        cid = str(country_match.get("countryId") or country_match.get("id") or "")
 
         cities = self._client.list_cities(cid)
         city_match = find_by_name(cities, self._city)
@@ -218,11 +223,37 @@ class YugoProvider(BaseProvider):
 
         return str(city_match.get("contentId") or city_match.get("id") or "")
 
+    def _resolve_country_id(self) -> Optional[str]:
+        if self._country_id:
+            return str(self._country_id)
+
+        countries = self._client.list_countries()
+        country_match = find_by_name(countries, self._country)
+        if not country_match:
+            logger.error("Yugo: country '%s' not found", self._country)
+            return None
+        return str(country_match.get("countryId") or country_match.get("id") or "")
+
     def discover_properties(self) -> List[Dict[str, Any]]:
         city_id = self._resolve_city_id()
         if not city_id:
             return []
         return self._client.list_residences(city_id)
+
+    def list_countries(self) -> List[Dict[str, Any]]:
+        return self._client.list_countries()
+
+    def list_cities(self, country_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        cid = country_id or self._resolve_country_id()
+        if not cid:
+            return []
+        return self._client.list_cities(cid)
+
+    def list_residences(self, city_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        cid = city_id or self._resolve_city_id()
+        if not cid:
+            return []
+        return self._client.list_residences(cid)
 
     def _academic_year_matches(
         self,
@@ -246,67 +277,27 @@ class YugoProvider(BaseProvider):
             return False
         return True
 
-    def _is_semester1_option(self, option: Dict[str, Any]) -> bool:
-        """
-        Check if a tenancy option is Semester 1.
-
-        Detection methods (any match = True):
-        1. Name/label contains "semester 1" keyword
-        2. Short duration (~20 weeks) with Sep-Oct start and Jan-Feb end
-        """
-        label = " ".join([
-            str(option.get("name", "")),
-            str(option.get("formattedLabel", "")),
-        ]).lower()
-
-        SEMESTER1_KEYWORDS = ["semester 1", "sem 1", "first semester", "semester1"]
-        has_keyword = any(kw in label for kw in SEMESTER1_KEYWORDS)
-
-        start_date = option.get("startDate", "")
-        end_date = option.get("endDate", "")
-
-        start_dt = None
-        end_dt = None
-        if start_date:
-            try:
-                from datetime import datetime as dt
-                start_dt = dt.strptime(start_date, "%Y-%m-%d")
-            except ValueError:
-                pass
-        if end_date:
-            try:
-                from datetime import datetime as dt
-                end_dt = dt.strptime(end_date, "%Y-%m-%d")
-            except ValueError:
-                pass
-
-        # Method 1: Keyword match + date validation
-        if has_keyword:
-            if start_dt and start_dt.month not in (8, 9, 10):
-                return False
-            if end_dt and end_dt.month not in (12, 1, 2):
-                return False
-            return True
-
-        # Method 2: Duration-based detection (no keyword needed)
-        if start_dt and end_dt:
-            duration_weeks = (end_dt - start_dt).days / 7
-            if (duration_weeks <= 25 and
-                start_dt.month in (8, 9, 10) and
-                end_dt.month in (12, 1, 2)):
-                return True
-
-        return False
-
     def scan(
         self,
         academic_year: str = "2026-27",
         semester: int = 1,
         apply_semester_filter: bool = True,
+        academic_config: Optional[AcademicYearConfig] = None,
     ) -> List[RoomOption]:
         city_id = self._resolve_city_id()
         if not city_id:
             return []
+
+        if academic_config is None:
+            academic_config = AcademicYearConfig()
+            try:
+                start_year, end_year = (int(y) for y in academic_year.split("-"))
+                if end_year < 100:
+                    end_year = (start_year // 100) * 100 + end_year
+                academic_config.start_year = start_year
+                academic_config.end_year = end_year
+            except (ValueError, AttributeError):
+                pass
 
         results: List[RoomOption] = []
         residences = self._client.list_residences(city_id)
@@ -338,8 +329,19 @@ class YugoProvider(BaseProvider):
 
                     options = group.get("tenancyOption") or []
                     for option in options:
-                        if apply_semester_filter and semester == 1 and not self._is_semester1_option(option):
-                            continue
+                        if apply_semester_filter and semester == 1:
+                            option_payload = {
+                                "fromYear": group.get("fromYear"),
+                                "toYear": group.get("toYear"),
+                                "tenancyOption": [{
+                                    "name": option.get("name"),
+                                    "formattedLabel": option.get("formattedLabel"),
+                                    "startDate": option.get("startDate"),
+                                    "endDate": option.get("endDate"),
+                                }],
+                            }
+                            if not match_semester1(option_payload, academic_config):
+                                continue
 
                         weekly = get_weekly_price(room)
                         price_label = room.get("priceLabel") or ""
@@ -418,8 +420,13 @@ class YugoProvider(BaseProvider):
             dt = datetime.strptime(date_str, "%Y-%m-%d")
             return dt.strftime("%a %b %d %Y 00:00:00 GMT+0000 (UTC)")
 
-        start_date_js = _to_js_date(option.start_date or raw.get("optionStartDate", ""))
-        end_date_js = _to_js_date(option.end_date or raw.get("optionEndDate", ""))
+        start_date_raw = option.start_date or raw.get("optionStartDate")
+        end_date_raw = option.end_date or raw.get("optionEndDate")
+        if not start_date_raw or not end_date_raw:
+            raise RuntimeError("Missing tenancy start/end dates for booking probe.")
+
+        start_date_js = _to_js_date(start_date_raw)
+        end_date_js = _to_js_date(end_date_raw)
 
         common_params = {
             "roomTypeId": raw["roomId"],

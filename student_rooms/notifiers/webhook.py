@@ -43,11 +43,16 @@ class WebhookNotifier(BaseNotifier):
 
         # Build body
         if self._config.body_template:
-            body = self._config.body_template.replace("{message}", message)
+            escaped_message = json.dumps(message)
+            body = self._config.body_template.replace("{message}", escaped_message)
             try:
                 payload = json.loads(body)
             except json.JSONDecodeError:
-                payload = body
+                body_alt = self._config.body_template.replace("{message}", escaped_message.strip('"'))
+                try:
+                    payload = json.loads(body_alt)
+                except json.JSONDecodeError:
+                    payload = body_alt
         else:
             # Default: Discord/Slack-compatible format
             payload = {"content": message, "text": message}

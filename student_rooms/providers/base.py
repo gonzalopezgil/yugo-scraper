@@ -9,6 +9,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from student_rooms.models.config import AcademicYearConfig
+
 
 @dataclass
 class RoomOption:
@@ -77,6 +79,7 @@ class BaseProvider(ABC):
         academic_year: str = "2026-27",
         semester: int = 1,
         apply_semester_filter: bool = True,
+        academic_config: Optional[AcademicYearConfig] = None,
     ) -> List[RoomOption]:
         """
         Scan for available room options.

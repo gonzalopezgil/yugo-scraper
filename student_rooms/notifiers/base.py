@@ -46,22 +46,56 @@ class StdoutNotifier(BaseNotifier):
         return True
 
 
+class DisabledNotifier(BaseNotifier):
+    """No-op notifier used when a configured backend is disabled."""
+
+    def __init__(self, reason: str):
+        self._reason = reason
+
+    @property
+    def name(self) -> str:
+        return "disabled"
+
+    def send(self, message: str) -> bool:
+        logger.warning(self._reason)
+        return False
+
+    def validate(self) -> Optional[str]:
+        return self._reason
+
+
 def create_notifier(config: NotificationConfig) -> BaseNotifier:
     """Factory: create the appropriate notifier based on config.type."""
     notifier_type = config.type.lower()
 
     if notifier_type == "stdout":
+        if not config.stdout.enabled:
+            reason = "Stdout notifier is disabled in config."
+            logger.warning(reason)
+            return DisabledNotifier(reason)
         return StdoutNotifier()
 
     elif notifier_type == "webhook":
+        if not config.webhook.enabled:
+            reason = "Webhook notifier is disabled in config."
+            logger.warning(reason)
+            return DisabledNotifier(reason)
         from student_rooms.notifiers.webhook import WebhookNotifier
         return WebhookNotifier(config.webhook)
 
     elif notifier_type == "telegram":
+        if not config.telegram.enabled:
+            reason = "Telegram notifier is disabled in config."
+            logger.warning(reason)
+            return DisabledNotifier(reason)
         from student_rooms.notifiers.telegram import TelegramNotifier
         return TelegramNotifier(config.telegram)
 
     elif notifier_type == "openclaw":
+        if not config.openclaw.enabled:
+            reason = "OpenClaw notifier is disabled in config."
+            logger.warning(reason)
+            return DisabledNotifier(reason)
         from student_rooms.notifiers.openclaw import OpenClawNotifier
         return OpenClawNotifier(config.openclaw)
 
