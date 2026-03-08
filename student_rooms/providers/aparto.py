@@ -30,6 +30,7 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 
+from student_rooms.models.config import AcademicYearConfig
 from student_rooms.providers.base import BaseProvider, RoomOption
 
 logger = logging.getLogger(__name__)
@@ -1000,6 +1001,7 @@ class ApartoProvider(BaseProvider):
         academic_year: str = "2026-27",
         semester: int = 1,
         apply_semester_filter: bool = True,
+        academic_config: Optional[AcademicYearConfig] = None,
     ) -> List[RoomOption]:
         """
         Full scan: probe StarRez termIDs + scrape main site for prices.
