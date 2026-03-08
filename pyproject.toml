@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "student-rooms-cli"
-version = "1.0.0"
+version = "1.1.0"
 description = "Multi-provider student accommodation finder and monitor"
 readme = "README.md"
 license = {text = "MIT"}
