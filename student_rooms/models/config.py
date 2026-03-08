@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -39,7 +40,14 @@ class AcademicYearConfig:
         if self.start_year and self.end_year:
             short_end = self.end_year % 100
             return f"{self.start_year}-{short_end:02d}"
-        return "2026-27"
+        now = datetime.now()
+        if now.month >= 8:
+            start_year = now.year
+            end_year = now.year + 1
+        else:
+            start_year = now.year - 1
+            end_year = now.year
+        return f"{start_year}-{end_year % 100:02d}"
 
 
 @dataclass
@@ -51,6 +59,8 @@ class ProviderConfig:
 class ProvidersConfig:
     yugo_enabled: bool = True
     aparto_enabled: bool = True
+    aparto_term_id_start: int = 1200
+    aparto_term_id_end: int = 1600
 
 
 @dataclass
@@ -155,8 +165,12 @@ def _load_yaml(path: str) -> Tuple[dict, List[str]]:
         warnings.append("PyYAML is not installed; skipping YAML config load.")
         return {}, warnings
 
-    with open(path, "r", encoding="utf-8") as handle:
-        data = yaml.safe_load(handle) or {}
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+    except yaml.YAMLError as exc:
+        warnings.append(f"YAML parse error in {path}: {exc}")
+        return {}, warnings
 
     if not isinstance(data, dict):
         warnings.append("Config root must be a mapping; using defaults.")
@@ -252,6 +266,8 @@ def load_config(yaml_path: str = "config.yaml") -> Tuple[Config, List[str]]:
         providers=ProvidersConfig(
             yugo_enabled=bool(_get_dict(providers_data, "yugo", {}).get("enabled", True)),
             aparto_enabled=bool(_get_dict(providers_data, "aparto", {}).get("enabled", True)),
+            aparto_term_id_start=int(_get_dict(providers_data, "aparto", {}).get("term_id_start", 1200)),
+            aparto_term_id_end=int(_get_dict(providers_data, "aparto", {}).get("term_id_end", 1600)),
         ),
     )
 

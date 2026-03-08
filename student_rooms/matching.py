@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from student_rooms.models.config import AcademicYearConfig, FilterConfig
+from student_rooms.providers.base import RoomOption
 
 
 def _has_private_arrangement(room: Dict, key: str) -> Optional[bool]:
@@ -85,6 +86,57 @@ def filter_room(room: Dict, filters: FilterConfig) -> bool:
             return False
 
     return True
+
+
+def apply_filters(results: List[RoomOption], filters: FilterConfig) -> List[RoomOption]:
+    """Apply FilterConfig to a list of RoomOption results."""
+    if not results:
+        return []
+    if (
+        filters.private_bathroom is None
+        and filters.private_kitchen is None
+        and filters.max_weekly_price is None
+        and filters.max_monthly_price is None
+    ):
+        return results
+
+    filtered: List[RoomOption] = []
+    for option in results:
+        raw = option.raw if isinstance(option.raw, dict) else {}
+        room_data = raw.get("roomData") or raw.get("room")
+
+        if room_data:
+            if not filter_room(room_data, filters):
+                continue
+        else:
+            # Private bathroom/kitchen filters require room metadata.
+            if filters.private_bathroom is not None:
+                continue
+            if filters.private_kitchen is not None:
+                continue
+
+        # Price filters: prefer RoomOption price_weekly, fallback to room metadata.
+        weekly_price = option.price_weekly
+        if weekly_price is None and room_data:
+            weekly_price = get_weekly_price(room_data)
+
+        monthly_price = None
+        if weekly_price is not None:
+            monthly_price = weekly_price * 4.33
+        elif room_data:
+            monthly_price = get_monthly_price(room_data)
+
+        if filters.max_weekly_price is not None:
+            if weekly_price is None or weekly_price > filters.max_weekly_price:
+                continue
+
+        if filters.max_monthly_price is not None:
+            if monthly_price is None or monthly_price > filters.max_monthly_price:
+                continue
+
+        filtered.append(option)
+
+    return filtered
 
 
 def _parse_yyyy_mm_dd(value: Optional[str]) -> Optional[datetime]:
