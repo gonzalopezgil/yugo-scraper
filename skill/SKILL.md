@@ -10,7 +10,7 @@ Multi-provider student accommodation finder and monitor. Query Yugo and Aparto f
 ## Setup
 
 ```bash
-cd /Users/thoth/.openclaw/workspace/yugo-scraper
+cd /path/to/student-rooms-cli
 source .venv/bin/activate
 ```
 
@@ -88,7 +88,7 @@ JSON output structure:
 python -m student_rooms watch --provider all
 ```
 
-Scans at configured interval (default 1h + random jitter). Alerts only on **new** options not previously seen. Persists seen options in `reports/seen_options.json`.
+Scans at configured interval (default 1h + random jitter). Alerts only on **new** options not previously seen. Persists seen options locally to avoid duplicate alerts.
 
 ### probe-booking — Deep booking-flow probe
 
