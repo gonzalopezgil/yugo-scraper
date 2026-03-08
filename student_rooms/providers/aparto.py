@@ -18,6 +18,7 @@ StarRez portal topology:
 """
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import re
@@ -721,7 +722,8 @@ class StarRezScraper:
         start_id: int = DEFAULT_TERM_SCAN_START,
         end_id: int = DEFAULT_TERM_SCAN_END,
         target_city_only: bool = True,
-        delay: float = 0.15,
+        delay: float = 0.05,
+        total_timeout: float = 90.0,
     ) -> List[StarRezTerm]:
         """
         Scan a range of termIDs and return valid terms for the target city.
@@ -729,6 +731,7 @@ class StarRezScraper:
         Uses a smart scanning strategy:
         1. Start from start_id and scan upward
         2. Stop after max_consecutive_misses misses past the last hit
+        3. Enforce a total timeout to prevent long scans
         """
         if not self._establish_session():
             logger.error("Failed to establish StarRez session")
@@ -737,9 +740,35 @@ class StarRezScraper:
         terms: List[StarRezTerm] = []
         consecutive_misses = 0
         last_hit_id = start_id
+        processed = 0
+        timed_out = False
+        start_time = time.monotonic()
+        deadline = start_time + total_timeout
 
-        for tid in range(start_id, end_id + 1):
-            term = self.probe_term(tid)
+        max_workers = 8
+        max_in_flight = max_workers * 4
+        next_id = start_id
+        next_expected = start_id
+        pending: Dict[concurrent.futures.Future, int] = {}
+        ready: Dict[int, Optional[StarRezTerm]] = {}
+        stop_early = False
+
+        def _submit_next(executor: concurrent.futures.ThreadPoolExecutor) -> bool:
+            nonlocal next_id
+            if next_id > end_id:
+                return False
+            if time.monotonic() >= deadline:
+                return False
+            if delay > 0:
+                time.sleep(delay)
+            future = executor.submit(self.probe_term, next_id)
+            pending[future] = next_id
+            next_id += 1
+            return True
+
+        def _process_term(tid: int, term: Optional[StarRezTerm]) -> None:
+            nonlocal consecutive_misses, last_hit_id, stop_early, processed
+            processed += 1
             if term:
                 consecutive_misses = 0
                 last_hit_id = tid
@@ -772,12 +801,71 @@ class StarRezScraper:
                         "Stopping scan at termID %d (%d consecutive misses past last hit %d)",
                         tid, consecutive_misses, last_hit_id,
                     )
+                    stop_early = True
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            while True:
+                while len(pending) < max_in_flight and next_id <= end_id:
+                    if time.monotonic() >= deadline:
+                        timed_out = True
+                        break
+                    if not _submit_next(executor):
+                        break
+
+                if time.monotonic() >= deadline:
+                    timed_out = True
                     break
 
-            if delay > 0:
-                time.sleep(delay)
+                if next_expected in ready:
+                    term = ready.pop(next_expected)
+                    _process_term(next_expected, term)
+                    next_expected += 1
+                    if stop_early:
+                        break
+                    continue
 
-        scanned = min(end_id - start_id + 1, tid - start_id + 1)
+                if not pending:
+                    break
+
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+
+                done, _ = concurrent.futures.wait(
+                    pending.keys(),
+                    timeout=min(0.5, remaining),
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+
+                if not done:
+                    continue
+
+                for future in done:
+                    tid = pending.pop(future)
+                    try:
+                        ready[tid] = future.result()
+                    except Exception:
+                        ready[tid] = None
+
+                if stop_early:
+                    break
+
+            if timed_out or stop_early:
+                for future in pending:
+                    future.cancel()
+
+        scanned = processed
+        if timed_out:
+            logger.warning(
+                "StarRez scan timed out after %.1fs: %d/%d termIDs checked, %d target city terms found",
+                total_timeout,
+                scanned,
+                end_id - start_id + 1,
+                len(terms),
+            )
+            return terms
+
         logger.info(
             "StarRez scan complete: %d/%d termIDs checked, %d target city terms found",
             scanned,

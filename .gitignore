@@ -41,3 +41,9 @@ TASK.md
 BOOKING_AUTOMATION_ANALYSIS.md
 MIGRATION_PHASE_A.md
 APARTO_RESEARCH.md
+
+# Watcher / automation (personal)
+watcher.sh
+watcher-state.json
+watcher.log
+llm-audit.sh
