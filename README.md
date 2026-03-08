@@ -1,5 +1,9 @@
 # student-rooms-cli 🏠
 
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+![License MIT](https://img.shields.io/github/license/gonzalopezgil/student-rooms-cli)
+![Providers](https://img.shields.io/badge/providers-2_(Yugo_%2B_Aparto)-teal)
+
 Multi-provider student accommodation finder and monitor. Discover properties, scan for availability, and get instant alerts when rooms matching your criteria appear.
 
 Built for students hunting semester accommodation — especially when options appear unpredictably and sell out fast.
@@ -64,15 +68,14 @@ Built for students hunting semester accommodation — especially when options ap
 ## Installation
 
 ```bash
-# Clone and install in development mode
+# Install directly from GitHub
+pip install "git+https://github.com/gonzalopezgil/student-rooms-cli.git"
+
+# Or clone for development
 git clone https://github.com/gonzalopezgil/student-rooms-cli.git
 cd student-rooms-cli
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-
-# Or install dependencies directly
-pip install requests beautifulsoup4 pyyaml
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
 ```
 
 ## Quick Start
@@ -308,6 +311,14 @@ python -m pytest tests/test_notifiers.py -v
 3. Add config dataclass in `models/config.py`
 4. Register in `notifiers/base.py`'s `create_notifier()` factory
 5. Add tests in `tests/test_notifiers.py`
+
+## Roadmap
+
+- [ ] More providers (Collegiate, Host, Unite Students)
+- [ ] GitHub Actions CI
+- [ ] PyPI package
+
+Actively developed — contributions welcome!
 
 ## License
 
