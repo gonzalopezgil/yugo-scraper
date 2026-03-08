@@ -24,11 +24,7 @@ Built for students hunting semester accommodation — especially when options ap
 
 ### Yugo
 
-| | |
-|---|---|
-| **Website** | [yugo.com](https://yugo.com) |
-| **Method** | REST API (undocumented JSON endpoints) |
-| **Coverage** | 11 countries, 70+ cities |
+**Website:** [yugo.com](https://yugo.com) · **Method:** REST API (undocumented JSON endpoints) · **Coverage:** 11 countries, 70+ cities
 
 <details>
 <summary>Full country & city list</summary>
@@ -51,11 +47,7 @@ Built for students hunting semester accommodation — especially when options ap
 
 ### Aparto
 
-| | |
-|---|---|
-| **Website** | [apartostudent.com](https://apartostudent.com) |
-| **Method** | StarRez portal probing + site scraping |
-| **Coverage** | 5 countries, 14 cities (properties discovered dynamically) |
+**Website:** [apartostudent.com](https://apartostudent.com) · **Method:** StarRez portal probing + site scraping · **Coverage:** 5 countries, 14 cities (discovered dynamically)
 
 | Country | Cities |
 |---------|--------|
