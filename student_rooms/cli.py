@@ -100,8 +100,6 @@ def make_providers(
         instances.append(ApartoProvider(
             city=city or config.target.city or "Dublin",
             country=country or config.target.country,
-            term_id_start=aparto_start or 1200,
-            term_id_end=aparto_end or 1600,
         ))
 
     return instances
